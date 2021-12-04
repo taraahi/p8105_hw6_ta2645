@@ -1,0 +1,169 @@
+---
+title: "HW 6"
+author: "Tara Ahi"
+date: "12/4/2021"
+output: github_document
+---
+
+```{r setup}
+library(tidyverse)
+library(modelr)
+
+set.seed(1)
+```
+
+```{r format, include = FALSE}
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.clour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_color_viridis_d()
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+
+# Problem 1
+
+Loading and cleaning the data:
+
+```{r}
+birthweight_df = 
+  read_csv("birthweight.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    babysex = as.character(babysex),
+    bhead = as.numeric(bhead),
+    blength = as.numeric(blength),
+    bwt = as.numeric(bwt),
+    delwt = as.numeric(delwt),
+    fincome = as.numeric(fincome),
+    frace = as.character(frace),
+    gaweeks = as.numeric(gaweeks),
+    malform = as.character(malform),
+    menarche = as.numeric(menarche),
+    mheight = as.numeric(mheight),
+    momage = as.numeric(momage),
+    mrace = as.character(mrace),
+    parity = as.numeric(parity),
+    pnumlbw = as.numeric(pnumlbw),
+    pnumsga = as.numeric(pnumsga),
+    ppbmi = as.numeric(ppbmi),
+    ppwt = as.numeric(ppwt),
+    smoken = as.numeric(smoken),
+    wtgain = as.numeric(wtgain)
+  ) 
+```
+
+```{r, eval=FALSE}
+sapply(birthweight_df, function(x) sum(is.na()))
+#no missing values
+```
+
+
+I'm fitting an initial model that considers birthweight as an outcome that may depend on gestational age in weeks (`gaweeks`) and family income (`fincome`). 
+
+```{r}
+fit = lm(bwt ~ gaweeks + fincome, data = birthweight_df)
+```
+
+```{r, eval=FALSE}
+summary(fit)
+summary(fit)$coef
+coef(fit)
+fitted.values(fit)
+```
+
+```{r}
+fit %>% 
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  knitr::kable(digits = 3)
+```
+
+The intercept is 455, with the coefficient of gestational age in weeks being about 65 and the coefficient of family income being about 2 _(see table)_.
+
+### Plot of model residuals against fitted values
+
+```{r}
+birthweight_df %>% 
+  modelr::add_predictions(fit, var = "predictor") %>% 
+  modelr::add_residuals(fit, var = "residual") %>% 
+  ggplot(aes(x = predictor, y = residual)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(se = FALSE, method = "lm", color = "blue") +
+  labs(
+    x = "predicted values", y = "residual values"
+  )
+```
+
+The graph shows more outliers to the left of the plot, though the main cluster is largely in the center. We see an even distribution around 0 for residual values. This is likely a valid model to use in this analysis. 
+
+### Compare models
+
+Model 2: Using length at birth and gestational age as predictors
+
+```{r}
+fit2 = lm(bwt ~ blength + gaweeks, data = birthweight_df)
+```
+
+Model 3: Using head circumfrance, length, sex and interactions
+
+```{r}
+fit3 = lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = birthweight_df)
+```
+
+#### Cross Validation
+
+```{r}
+cv_df =
+  crossv_mc(birthweight_df, 100) %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble)
+         )
+
+cv_df = 
+  cv_df %>% 
+  mutate(
+    fit = map(train, ~lm(bwt ~ gaweeks + fincome, data = .x)),
+    fit2 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    fit3 = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = .x)),
+  ) %>% 
+  mutate(
+    rmse_fit = map2_dbl(fit, test, ~rmse(model = .x, data = .y)),
+    rmse_fit2 = map2_dbl(fit2, test, ~rmse(model = .x, data = .y)),
+    rmse_fit3 = map2_dbl(fit3, test, ~rmse(model = .x, data = .y))
+  )
+```
+
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse"
+  ) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin(aes(fill = model)) +
+  labs(
+    x = "Model",
+    y = "rmse"
+  ) +
+  scale_x_discrete(labels = c("_fit" = "model 1", "_fit2" = "model 2", "_fit3" = "model 3")) +
+  theme(legend.position = "none")
+  
+```
+
+This gives us a sense of variance in prediction error and compares prediction error distribution across methods. The graph shows that model 3 is the most optimal one.
