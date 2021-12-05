@@ -167,3 +167,115 @@ cv_df %>%
 ```
 
 This gives us a sense of variance in prediction error and compares prediction error distribution across methods. The graph shows that model 3 is the most optimal one.
+
+
+# Problem 2
+
+Importing data (code from instructions)
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+#### Use 5000 bootstrap samples and, for each bootstrap sample, produce estimates of these two quantities
+
+```{r}
+set.seed(1)
+
+boot_sample = function(df) {
+  sample_frac(df, replace = TRUE)
+}
+
+bootstrap_df = 
+  data_frame(
+    strap_number = 1:5000, 
+    strap_sample = rerun(5000, boot_sample(weather_df)))
+```
+
+#### Using the 5000 bootstrap estimates, identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for r^ 2 and log(β̂ 0∗β̂ 1)
+
+##### R squared
+
+```{r}
+bootstrap_1 = 
+  bootstrap_df %>% 
+  mutate(
+    models = map(strap_sample, ~lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::glance)
+  ) %>% 
+  select(-strap_sample, -models) %>% 
+  unnest(results)
+
+bootstrap_1 %>% 
+  janitor::clean_names() %>% 
+  summarise(lower_limit = quantile(r_squared, c(0.025)),
+            upper_limit = quantile(r_squared, c(0.975))) %>% 
+  knitr::kable()
+
+```
+
+**The 95% CI of r^2 is 0.89, 0.93.**
+
+###### Plot the distribution of your estimate
+
+```{r}
+bootstrap_1 %>% 
+  ggplot(aes(x = r.squared)) +
+  geom_density() +
+  labs(x = "r squared estimates", y = "density")
+```
+
+
+##### log(β̂ 0∗β̂ 1)
+
+```{r}
+log_b_h = function(df) {
+  log(df[1,2]*df[2,2]) %>% 
+    tibble() %>% 
+    mutate(log_b = .$estimate) %>% 
+    select(log_b)
+}
+
+bootstrap_2 = 
+  bootstrap_df %>% 
+  mutate(
+    models = map(strap_sample, ~lm(tmax ~ tmin, data = .x)),
+         results = map(models, broom::tidy),
+         log_b = map(results, log_b_h)) %>% 
+        select(-strap_sample, -models) %>% 
+        unnest(log_b)
+
+bootstrap_2 %>% 
+  janitor::clean_names() %>% 
+  summarize(
+    lower_limit = quantile(log_b, c(0.025)),
+    upper_limit = quantile(log_b, c(0.975))
+  ) %>% 
+  knitr::kable()
+```
+
+**The 95% CI of log(β̂ 0∗β̂) is 1.96, 2.06**
+
+###### Plot the distribution of your estimate
+
+```{r}
+bootstrap_2 %>% 
+  ggplot(aes(x = log_b)) +
+  geom_density() +
+  labs(x = "log beta values", y = "density")
+```
+
+
+Both of the plots are observed to have an approximately normal distribution. 
+
+
